@@ -33,7 +33,7 @@ class BackboneTaxonomyTests(unittest.TestCase):
         graft_from_other(other, lookup, polyphyletic_names)
         self.assertEqual(['a', 'b'],
                          sorted([n.name for n in lookup['c'].children]))
-        self.assertEqual([], [n.name for n in lookup['f'].children])
+        self.assertEqual(['d', 'e'], [n.name for n in lookup['f'].children])
 
     def test_carryover(self):
         tree = skbio.TreeNode.read(["((a,b)p__c,(d,f)c__g);"])
