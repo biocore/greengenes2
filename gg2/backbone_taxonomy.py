@@ -65,8 +65,8 @@ def strip_ranks(df):
 
 def adjust_ltp(ltp_tax):
     # remove extraneous quotes
-    ltp_tax['lineage'] = ltp_tax['lineage'].replace('"', '')
-    ltp_tax['original_species'] = ltp_tax['original_species'].replace('"', '')
+    ltp_tax['lineage'] = ltp_tax['lineage'].apply(lambda x: x.replace('"', ''))
+    ltp_tax['original_species'] = ltp_tax['original_species'].apply(lambda x: x.replace('"', ''))
 
     for _, row in ltp_tax.iterrows():
         if 'Pseudomonadota' in row['lineage']:
