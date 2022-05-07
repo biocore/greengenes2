@@ -25024,6 +25024,7 @@ G011047885	d__Bacteria; p__Desulfobacterota; c__BSN033; o__BSN033; f__UBA1163; g
 G002010915	d__Bacteria; p__Desulfobacterota; c__JdFR-97; o__JdFR-97; f__JdFR-97; g__JdFR-97; s__JdFR-97 sp002010915
 G011327825	d__Bacteria; p__Desulfobacterota; c__JdFR-97; o__JdFR-97; f__JdFR-97; g__DSVT01; s__DSVT01 sp011327825
 G011046395	d__Bacteria; p__Desulfobacterota; c__QYQD01; o__QYQD01; f__QYQD01; g__QYQD01; s__QYQD01 sp011046395
+KY471008	d__Bacteria; p__Desulfobacterota; c__; o__; f__; g__; s__
 G000010985	d__Bacteria; p__Deferribacterota; c__Deferribacteres; o__Deferribacterales; f__Deferribacteraceae; g__Deferribacter; s__Deferribacter desulfuricans
 AP011529	d__Bacteria; p__Deferribacterota; c__Deferribacteres; o__Deferribacterales; f__Deferribacteraceae; g__Deferribacter; s__Deferribacter desulfuricans
 AJ515882	d__Bacteria; p__Deferribacterota; c__Deferribacteres; o__Deferribacterales; f__Deferribacteraceae; g__Deferribacter; s__Deferribacter abyssi
@@ -27364,7 +27365,6 @@ AB062751	d__Bacteria; p__Myxococcota; c__Polyangia; o__Haliangiales; f__Haliangi
 KX815124	d__Bacteria; p__Myxococcota; c__Bradymonadia; o__Bradymonadales; f__Bradymonadaceae; g__Lujinxingia; s__Lujinxingia litoralis
 MG652491	d__Bacteria; p__Myxococcota; c__Bradymonadia; o__Bradymonadales; f__Bradymonadaceae; g__Lujinxingia; s__Lujinxingia sediminis
 KM034744	d__Bacteria; p__Myxococcota; c__Bradymonadia; o__Bradymonadales; f__Bradymonadaceae; g__Bradymonas; s__Bradymonas sediminis
-KY471008	d__Bacteria; p__Thermodesulfobacteriota; c__; o__; f__; g__; s__
 G000006175	d__Archaea; p__Methanobacteriota; c__Methanococci; o__Methanococcales; f__Methanococcaceae; g__Methanococcus; s__Methanococcus voltae
 M59290	d__Archaea; p__Methanobacteriota; c__Methanococci; o__Methanococcales; f__Methanococcaceae; g__Methanococcus; s__Methanococcus voltae
 G000017165	d__Archaea; p__Methanobacteriota; c__Methanococci; o__Methanococcales; f__Methanococcaceae; g__Methanococcus; s__Methanococcus vannielii
