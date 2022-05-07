@@ -73,10 +73,14 @@ def adjust_ltp(ltp_tax):
             row['lineage'] = row['lineage'].replace('Pseudomonadota',
                                                     'Proteobacteria')
 
+        if 'ThermodesulfobacteriotaThermodesulfobacteria' in row['lineage']:
+            # typo
+            row['lineage'] = row['lineage'].replace('ThermodesulfobacteriotaThermodesulfobacteria',
+                                                    'Thermodesulfobacteriota;Thermodesulfobacteria')
         if 'Thermodesulfobacteriota' in row['lineage']:
             # see https://gtdb.ecogenomic.org/genome?gid=GCA_001508095.1
-            row['lineage'] = row['lineage'].replace('Desulfobacterota',
-                                                    'Thermodesulfobacteriota')
+            row['lineage'] = row['lineage'].replace('Thermodesulfobacteriota',
+                                                    'Desulfobacterota')
 
         if 'Hydrogenophilalia' in row['lineage']:
             # see https://gtdb.ecogenomic.org/genome?gid=GCA_001802655.1
@@ -175,6 +179,8 @@ def check_overlap(gtdb_tax, ltp_tax):
             if len(a & b):
                 print("ltp conflict %s %s" % (i, j))
                 print(a & b)
+                print(ltp_tax[ltp_tax[i].isin(a & b)][['id', 'phylum','class','order']])
+                print(ltp_tax[ltp_tax[j].isin(a & b)][['id', 'phylum','class','order']])
                 raise ValueError()
 
 def check_species_labels(ltp_tax):
