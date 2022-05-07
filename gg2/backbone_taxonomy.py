@@ -64,6 +64,10 @@ def strip_ranks(df):
 
 
 def adjust_ltp(ltp_tax):
+    # remove extraneous quotes
+    ltp_tax['lineage'] = ltp_tax['lineage'].replace('"', '')
+    ltp_tax['original_species'] = ltp_tax['original_species'].replace('"', '')
+
     for _, row in ltp_tax.iterrows():
         if 'Pseudomonadota' in row['lineage']:
             row['lineage'] = row['lineage'].replace('Pseudomonadota',
@@ -312,6 +316,7 @@ def harmonize(tree, gtdb, ltp, output):
     ltp_tax = pd.read_csv(ltp, sep='\t', names=['id', 'original_species',
                                                 'lineage', 'u0', 'type',
                                                 'u1', 'u2'])
+
     tree_tips = {n.name for n in tree.tips()}
 
     adjust_ltp(ltp_tax)
