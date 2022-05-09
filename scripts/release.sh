@@ -20,7 +20,11 @@ fi
 b=data/${version}/${base} 
 label=${label}
 
-python release-prep.py \
+mkdir -p release/${version}
+
+cp ${b}/*backbone*.qza release/${version}/
+
+python scripts/release-prep.py \
     --coarse-level ${b}/0.3 \
     --coarse-threshold 0.3 \
     --other-level ${b}/0.1 \

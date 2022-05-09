@@ -79,7 +79,6 @@ def release(coarse_level, other_level, other_level_threshold, coarse_threshold,
         assert os.path.exists(treepath(path))
         assert os.path.exists(taxpath(path))
 
-    os.mkdir(output)
     THRESHOLD = 'Confidence'
 
     coarse_tree = bp.parse_newick(open(treepath(coarse_level)).read())

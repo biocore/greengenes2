@@ -26,7 +26,8 @@ method=${method}
 # reroot based on archaea
 t2t reroot -n backbone/${v}/archaea.ids \
     -p ${b}/${t}/placement.jplace \
-    -o ${b}/${t}/placement.rt.jplace
+    -o ${b}/${t}/placement.rt.jplace \
+    --out-of-target support-files/${v}/arbitrary_bacteria.txt
 
 # decorate taxonomy
 t2t decorate -m backbone/${v}/taxonomy.tsv \
@@ -61,7 +62,3 @@ t2t fetch -t ${b}/${t}/${declabel}.${method}.clean.pro.nwk \
     -o ${b}/${t}/${declabel}.${method}.clean.pro.taxonomy.nwk \
     --as-tree
 
-python basic_summary.py ${b}/${t}/${declabel}.${method}.clean.pro.tsv > ${b}/${t}/${declabel}.${method}.clean.pro.tsv.summary
-
-cd scripts
-sbatch --export version=${v},base=${base},label=${declabel}.${method}.clean.pro release.sh
