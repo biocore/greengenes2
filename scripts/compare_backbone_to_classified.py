@@ -7,7 +7,8 @@ import click
 @click.option('--decorated-taxonomy', type=click.Path(exists=True), required=True)
 @click.option('--level', type=int, default=1, required=True)
 @click.option('--examine', type=str, required=False)
-def compare(backbone_taxonomy, decorated_taxonomy, level, examine):
+@click.option('--get-records', is_flag=True, required=False, default=False)
+def compare(backbone_taxonomy, decorated_taxonomy, level, examine, get_records):
     backbone = pd.read_csv(backbone_taxonomy, sep='\t', names=['id', 'taxon']).set_index('id')
     decorated = pd.read_csv(decorated_taxonomy, sep='\t', names=['id', 'taxon']).set_index('id')
 
@@ -71,6 +72,19 @@ def compare(backbone_taxonomy, decorated_taxonomy, level, examine):
                 print(backbone.loc[x, 'taxon'])
                 print('---')
                 print(decorated.loc[x, 'taxon'])
+
+    if get_records:
+        results = []
+        for n in df['name']:
+            bbname = backbone[backbone['target'] == n]
+            decname = decorated[decorated['target'] == n]
+
+            for id in set(decname.index) - set(bbname.index):
+                exp = backbone.loc[id, 'target']
+                results.append((id, n, exp))
+
+        results = pd.DataFrame(results, columns=['id', 'observed', 'expected'])
+        results.to_csv(f'{level}.false_positive.records.tsv', sep='\t', index=False, header=True)
 
 if __name__ == '__main__':
     compare()
