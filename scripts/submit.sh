@@ -27,13 +27,14 @@ do
     fi
 done
 
-jobs+=($(sbatch \
-    --export version=$version,base=${base},threshold=${d},label=${label} \
-    --parsable \
-    classifier.sh))
-
 dependency=$(join_by : ${jobs[@]})
+job=$(sbatch \
+      --dependency=afterok:${dependency} \
+      --export version=$version,base=${base},label=${label} \
+      --parsable \
+      classifier.sh)
+
 sbatch \
-    --dependency=afterok:${dependency} \
+    --dependency=afterok:${job} \
     --export base=${base},version=${version},label=${label}.${method}.clean.pro \
     release.sh

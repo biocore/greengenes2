@@ -34,7 +34,7 @@ t2t decorate -m backbone/${v}/taxonomy.tsv \
     -o ${b}/${t}/${declabel} \
     -p ${b}/${t}/placement.rt.jplace \
     --no-suffix \
-    --min-count 1
+    --min-count 1 
 
 # resolve placements
 bp placement --placements ${b}/${t}/${declabel}.jplace \
