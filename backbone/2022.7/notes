@@ -1,0 +1,7 @@
+7.27.22
+based on mock community data, we observed inconsistencies in the GTDB / LTP polyphyletic designations for the following so the polyphyletic labels were removed
+
+open question: should we remove all species level polyphyletic labels?
+- removed polyphyletic tag for s__Pseudomonas aeruginosa
+- removed polyphyletic tag for s__Listeria monocytogenes
+- removed polyphyletic tag for s__Bacillus cereus
