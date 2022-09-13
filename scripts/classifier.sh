@@ -15,8 +15,8 @@ fi
 
 v=${version}
 b=data/${version}/${base} 
-
-python scripts/fetch_backbone_seqs.py ${b}/0.1/${label}-consensus-strings ${b}/seqs.fa ${b}/backbone
+threshold=entropy0.8-gap0.1
+python scripts/fetch_backbone_seqs.py ${b}/${threshold}/${label}-consensus-strings ${b}/all/seqs.fa ${b}/backbone
 
 qiime tools import \
     --input-path ${b}/backbone.fna \

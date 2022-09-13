@@ -29,12 +29,25 @@ t2t reroot -n backbone/${v}/archaea.ids \
     -o ${b}/${t}/placement.rt.jplace \
     --out-of-target support-files/${v}/arbitrary_bacteria.txt
 
-# decorate taxonomy
-t2t decorate -m backbone/${v}/taxonomy.tsv \
-    -o ${b}/${t}/${declabel} \
-    -p ${b}/${t}/placement.rt.jplace \
-    --no-suffix \
-    --min-count 1 
+
+if [[ -f backbone/${v}/secondary_taxonomy.tsv ]]; then
+    # decorate taxonomy
+    t2t decorate -m backbone/${v}/taxonomy.tsv \
+        -o ${b}/${t}/${declabel} \
+        -p ${b}/${t}/placement.rt.jplace \
+        --no-suffix \
+        --secondary-taxonomy backbone/${v}/secondary_taxonomy.tsv \
+        --recover-polyphyletic \
+        --correct-binomials \
+        --min-count 1 
+else
+    t2t decorate -m backbone/${v}/taxonomy.tsv \
+        -o ${b}/${t}/${declabel} \
+        -p ${b}/${t}/placement.rt.jplace \
+        --no-suffix \
+        --correct-binomials \
+        --min-count 1 
+fi
 
 # resolve placements
 bp placement --placements ${b}/${t}/${declabel}.jplace \
@@ -49,7 +62,9 @@ else
     cp ${b}/${t}/${declabel}.${method}.nwk ${b}/${t}/${declabel}.${method}.clean.nwk
 fi
 
-grep "^>" ${b}/${t}/seqs.fa | tr -d ">" > ${b}/${t}/placements.ids
+# 2022.7 has the placement IDs in the entropy file, whereas seqs.fa is all seqs
+# grep "^>" ${b}/${t}/seqs.fa | tr -d ">" > ${b}/${t}/placements.ids
+cat ${b}/${t}/entropy*.txt > ${b}/${t}/placements.ids
 t2t promote-multifurcation -t ${b}/${t}/${declabel}.${method}.clean.nwk \
     -f ${b}/${t}/placements.ids \
     -o ${b}/${t}/${declabel}.${method}.clean.pro.nwk
@@ -61,4 +76,3 @@ t2t fetch -t ${b}/${t}/${declabel}.${method}.clean.pro.nwk \
 t2t fetch -t ${b}/${t}/${declabel}.${method}.clean.pro.nwk \
     -o ${b}/${t}/${declabel}.${method}.clean.pro.taxonomy.nwk \
     --as-tree
-

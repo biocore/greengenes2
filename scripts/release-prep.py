@@ -73,7 +73,7 @@ def release(coarse_level, other_level, other_level_threshold, coarse_threshold,
         return f'{output}/{release_name}.phylogeny.{i}.nwk'
 
     def releaseseqsname():
-        return f'{output}/{release_name}.seqs.fna.qz'
+        return f'{output}/{release_name}.seqs.fna.gz'
 
     for path in [coarse_level] + list(other_level):
         assert os.path.exists(treepath(path))

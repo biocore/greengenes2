@@ -4,35 +4,57 @@ import pandas as pd
 from t2t.nlevel import make_consensus_tree, pull_consensus_strings
 from functools import partial
 import skbio
+from fuzzywuzzy import fuzz
+import re
+from collections import defaultdict
 
 
-def get_polyphyletic(df, level):
-    """gtdb uses foo, foo_A, foo_B etc for polyphyletic groups"""
-    no_suffix = df[level].apply(lambda x: x.split('__', 1)[1])
-    unique = pd.Series(no_suffix.unique())
-    suffix_removed = unique.apply(lambda x: x.rsplit('_', 1)[0])
-    dedup = pd.DataFrame([unique, suffix_removed], index=[level, 'suffix_removed']).T
-    polyphyletic_names = set()
-    for name, grp in dedup.groupby('suffix_removed'):
-        if len(grp) > 1:
-            polyphyletic_names.update(set(grp[level]))
-    idx = no_suffix[no_suffix.isin(polyphyletic_names)].index
-    return set(df.loc[idx, level])
+def remove_unmappable_polyphyletic(gtdb, ltp):
+    """GTDB expresses some polyphyetic labels. Mapping LTP can be ambiguous
 
+    If an LTP record has a high fuzzy match to a polyphyletic label then we
+    cannot be confident about the lineage mapping. In these scenarios, we
+    remove the LTP lineage information from our resulting taxonomy. This is
+    safe as the name is already represented by GTDB, and assuming reasonable
+    phylogenetic placement, the lineage for LTP should be recovered with the
+    correct polyphyletic labeling.
+    """
+    polyre1 = re.compile(r"s__[a-zA-Z0-9]+ .+_[A-Z]+$")  # s__foo bar_A
+    polyre2 = re.compile(r"s__.+_[A-Z]+")  # s__foo_A bar
+    polyre3 = re.compile(r"s__.+_[A-Z]+$")  # s__foo_A
+    ltp = ltp.copy()
 
-def has_polyphyletic(node, polyphyletic_names):
-    check = [node.name, ]
-    check += [a.name for a in node.ancestors()]
-    if set(check) & polyphyletic_names:
-        return True
-    else:
-        return False
+    polyphyletic = {n for n in gtdb['species'].unique() if
+                    polyre1.match(n) or polyre2.match(n)}
 
+    by_genus = defaultdict(list)
+    for n in polyphyletic:
+        genus = n.split(' ')[0]
+        if polyre3.match(genus):
+            # we have s__foo_A
+            genus = genus.rsplit('_', 1)[0]
 
-def clean_tree(tree):
-    for node in tree.traverse(include_self=True):
-        if hasattr(node, 'ChildLookup'):
-            delattr(node, 'ChildLookup')
+        # remove rank label as LTP doesn't have it
+        genus = genus.split('__', 1)[1]
+        by_genus[genus].append(n.split('__', 1)[1])
+
+    drop = []
+    for r in ltp.itertuples():
+        genus = r.species.split(' ')[0]
+        for gtdb_species in by_genus[genus]:
+            gtdb_genus = gtdb_species.split(' ')[0]
+
+            # if the ltp species has a high fuzzy match to a polyphyletic label
+            if fuzz.partial_ratio(gtdb_species, r.species) > 85:
+                drop.append(r.Index)
+                break
+
+            # or if the genus has a high fuzzy match to a polyphyletic label
+            elif '_' in gtdb_genus and fuzz.partial_ratio(genus, gtdb_genus) > 85:
+                drop.append(r.Index)
+                break
+
+    return ltp.loc[drop]
 
 
 LEVELS = ['domain', 'phylum', 'class', 'order', 'family',
@@ -69,6 +91,10 @@ def adjust_ltp(ltp_tax):
     ltp_tax['original_species'] = ltp_tax['original_species'].apply(lambda x: x.replace('"', ''))
 
     for _, row in ltp_tax.iterrows():
+        if 'Armatimonadetes' in row['lineage']:
+            row['lineage'] = row['lineage'].replace('Armatimonadetes',
+                                                    'Armatimonadota')
+
         if 'Pseudomonadota' in row['lineage']:
             row['lineage'] = row['lineage'].replace('Pseudomonadota',
                                                     'Proteobacteria')
@@ -107,6 +133,14 @@ def adjust_ltp(ltp_tax):
             # typo
             row['lineage'] = row['lineage'].replace('ActinomycetotaAcidimicrobiia',
                                                     'Actinomycetota;Acidimicrobiia')
+
+        if 'Bdellovibrionota;Bdellovibrionota' in row['lineage']:
+            row['lineage'] = row['lineage'].replace('Bdellovibrionota;Bdellovibrionota',
+                                                    'Bdellovibrionota')
+
+        if 'Nannocystale;Nannocystaceae' in row['lineage']:
+            row['lineage'] = row['lineage'].replace('Nannocystale;Nannocystaceae',
+                                                    'Nannocystales;Nannocystaceae')
 
         if 'Actinobacteria;Micrococcales' in row['lineage']:
             # see https://gtdb.ecogenomic.org/genome?gid=GCF_001423565.1
@@ -162,6 +196,11 @@ def adjust_ltp(ltp_tax):
             row['original_species'] = row['original_species'].split(' subsp. ')[0]
 
 
+        if 'Schaalia' in row['lineage']:
+            # see https://gtdb.ecogenomic.org/searches?s=al&q=g__schaalia
+            row['lineage'] = row['lineage'].replace('Schaalia', 'Pauljensenia')
+            row['original_species'] = row['original_species'].replace('Schaalia', 'Pauljensenia')
+
 def check_overlap(gtdb_tax, ltp_tax):
     # test if any names on overlap
     for i in LEVELS:
@@ -193,6 +232,9 @@ def check_consistent_parents(gtdb_tax, ltp_tax):
     # make sure the label at a given level always has the same parent name
     for idx, i in enumerate(LEVELS[1:], 1):  # not domain
         for name, grp in gtdb_tax.groupby(i):
+            if len(name) == 3 and name.endswith('__'):
+                continue
+
             if len(grp[LEVELS[idx-1]].unique()) != 1:
                 print(i, name, list(grp[LEVELS[idx-1]].unique()))
                 raise ValueError()
@@ -202,13 +244,13 @@ def check_consistent_parents(gtdb_tax, ltp_tax):
             if len(grp[LEVELS[idx-1]].unique()) != 1:
                 print(i, name, list(grp[LEVELS[idx-1]].unique()))
 
+
 def format_name(level, name):
     return "%s__%s" % (level[0], name)
 
+
 def prep_trees(gtdb_tree, ltp_tree):
     # decorate various flags on to the ltp tree
-    # and specifically remove "ChildLookup", which is not used
-    # and which appears to break TreeNode.copy
     for node in ltp_tree.traverse(include_self=False):
         node.keepable = False
         if node.is_tip():
@@ -223,30 +265,23 @@ def prep_trees(gtdb_tree, ltp_tree):
     clean_tree(gtdb_tree)
     clean_tree(ltp_tree)
 
-def graft_from_other(other, lookup, polyphyletic_names):
-    # in postorder, if we have a name in ltp that is either
-    # genus or species, attempt to find the corresponding node
-    # in gtdb. ignore nodes which are polyphyletic in gtdb.
+def clean_tree(tree):
+    for node in tree.traverse(include_self=True):
+        if hasattr(node, 'ChildLookup'):
+            delattr(node, 'ChildLookup')
+
+
+def graft_from_other(other, lookup):
+    # in postorder, attempt to find the corresponding node
+    # in gtdb.
     # graft the ungrafted portion of the subtree onto gtdb.
     # remove the subtree from ltp
     for node in list(other.postorder(include_self=False)):
         if node.is_tip():
             continue
 
-        # with this commented out, we are testing allowing grafting at all levels
-        # note assumes that, for example, phylum names in ltp have been adjusted
-        # to reflect gtdb
-        #if node.Rank not in (2, 3, 4, 5, 6):  # class order family genus species
-        #    continue
-
         if node.name in lookup:
             gtdb_node = lookup[node.name]
-
-            # with this commented out, we're disregarding polyphyletic constraints
-            # we are expecting tax2tree to account for polyphyletic names as it is
-            # already designed to do so
-            #if has_polyphyletic(gtdb_node, polyphyletic_names):
-            #    continue
 
             node.parent.remove(node)
             node = node.copy()
@@ -255,9 +290,6 @@ def graft_from_other(other, lookup, polyphyletic_names):
                 if not desc.is_tip():
                     desc.keepable = any([c.keepable for c in desc.children])
 
-                    # same here re: polyphyletic constraints
-                    # desc.keepable &= not has_polyphyletic(desc, polyphyletic_names)
-
             for desc in list(node.postorder(include_self=False)):
                 if not desc.keepable:
                     desc.parent.remove(desc)
@@ -265,9 +297,9 @@ def graft_from_other(other, lookup, polyphyletic_names):
             if node.children:
                 gtdb_node.extend(node.children)
 
-def carryover(tax, tree, tree_lookup, polyphyletic_names):
-    # for any group which has an exact match, and which is not polyphyletic,
-    # adopt all tip labels at the respective taxonomic level
+def carryover(tax, tree, tree_lookup):
+    # for any group which has an exact match, adopt all tip labels at the
+    # respective taxonomic level
     unused = set(tax['id']) - {n.name for n in tree.tips()}
     for idx, level in enumerate(LEVELS[::-1]):
         for name, grp in tax.groupby(level):
@@ -281,17 +313,6 @@ def carryover(tax, tree, tree_lookup, polyphyletic_names):
             query = format_name(level, name)
             if query in tree_lookup:
                 current = tree_lookup[query]
-
-                # same here re: polyphyletic constraints
-                #if current.name in polyphyletic_names:
-                #    continue
-
-                #if has_polyphyletic(current, polyphyletic_names):
-                #    continue
-
-                # 0 species
-                # 1 genus
-                # etc
 
                 for to_add in range(len(LEVELS) - idx, len(LEVELS)):
                     level_to_add = LEVELS[to_add]
@@ -340,10 +361,28 @@ def harmonize(tree, gtdb, ltp, output):
     check_overlap(gtdb_tax, ltp_tax)
     check_consistent_parents(gtdb_tax, ltp_tax)
 
-    # gather names that appear polyphyletic in gtdb
-    polyphyletic_names = set()
-    for level in LEVELS:
-        polyphyletic_names.update(get_polyphyletic(gtdb_tax, level))
+    ltp_tax_to_write = remove_unmappable_polyphyletic(gtdb_tax, ltp_tax)
+    ltp_tax_to_write['lineage'] = [r.lineage + ';' + r.species
+                                   for r in ltp_tax_to_write.itertuples()]
+    # map to tree so we can get rank labels
+    ltp_tax_to_write_tree = skbio.TreeNode.from_taxonomy([(r.id, r.lineage.split(';'))
+                                                          for r in ltp_tax_to_write.itertuples()])
+    ltp_tax_to_write_tree.Rank = -1  # bridge node
+    for n in ltp_tax_to_write_tree.preorder(include_self=False):
+        if n.is_tip():
+            continue
+        n.Rank = n.parent.Rank + 1
+    prep_trees(skbio.TreeNode(), ltp_tax_to_write_tree)
+    result = pull_consensus_strings(ltp_tax_to_write_tree, append_prefix=False)
+
+    # these are the LTP records which were not integrated with GTDB
+    f = open(output + '.removed_ltp_taxa', 'w')
+    f.write('\n'.join(result))
+    f.write('\n')
+    f.close()
+
+    # these are the LTP records which were integrated
+    ltp_tax = ltp_tax[~ltp_tax['id'].isin(ltp_tax_to_write['id'])]
 
     # construct taxonomy trees
     for_consensus = [list(v) for _, v in gtdb_tax[LEVELS].iterrows()]
@@ -357,8 +396,8 @@ def harmonize(tree, gtdb, ltp, output):
 
     prep_trees(gtdb_tree, ltp_tree)
 
-    graft_from_other(ltp_tree, lookup, polyphyletic_names)
-    carryover(ltp_tax, gtdb_tree, lookup, polyphyletic_names)
+    graft_from_other(ltp_tree, lookup)
+    carryover(ltp_tax, gtdb_tree, lookup)
 
     result = pull_consensus_strings(gtdb_tree, append_prefix=False)
     f = open(output, 'w')
