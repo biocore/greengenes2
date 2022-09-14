@@ -1,37 +1,113 @@
 import unittest
 import skbio
 import pandas as pd
-from gg2.backbone_taxonomy import (graft_from_other, carryover, LEVELS,
-                                   parse_lineage,
-                                   remove_unmappable_polyphyletic)
+from gg2.backbone_taxonomy import (graft_from_other, LEVELS,
+                                   parse_lineage, get_polyphyletic,
+                                   ids_of_ambiguity_from_polyphyletic,
+                                   POLY_SPECIES, POLY_GENERAL)
 import pandas.testing as pdt
 
 
 class BackboneTaxonomyTests(unittest.TestCase):
-    def test_remove_unmappable_polyphyletic(self):
-        gtdb_data = pd.DataFrame([["G000425525", "d__Bacteria; p__Firmicutes_A; c__Clostridia; o__Lachnospirales; f__Lachnospiraceae; g__Ruminococcus_G; s__Ruminococcus_G gauvreauii"],
-                                  ["G000526735", "d__Bacteria; p__Firmicutes_A; c__Clostridia; o__Lachnospirales; f__Lachnospiraceae; g__Ruminococcus_B; s__Ruminococcus_B gnavus"],
-                                  ["G001917065", "d__Bacteria; p__Firmicutes_A; c__Clostridia; o__Oscillospirales; f__Acutalibacteraceae; g__Ruminococcus_E; s__Ruminococcus_E bromii_B"],
-                                  ["G003435865", "d__Bacteria; p__Firmicutes_A; c__Clostridia; o__Oscillospirales; f__Acutalibacteraceae; g__Ruminococcus_E; s__Ruminococcus_E bromii_B"],
-                                  ["G900101355", "d__Bacteria; p__Firmicutes_A; c__Clostridia; o__Oscillospirales; f__Acutalibacteraceae; g__Ruminococcus_E; s__Ruminococcus_E bromii_A"],
-                                  ["G900318235", "d__Bacteria; p__Firmicutes_A; c__Clostridia; o__Oscillospirales; f__Acutalibacteraceae; g__Ruminococcus_E; s__Ruminococcus_E sp900317315"],
-                                  ["G000518765", "d__Bacteria; p__Firmicutes_A; c__Clostridia; o__Oscillospirales; f__Ruminococcaceae; g__Ruminococcus; s__Ruminococcus flavefaciens"],
-                                  ["G000701945", "d__Bacteria; p__Firmicutes_A; c__Clostridia; o__Oscillospirales; f__Ruminococcaceae; g__Ruminococcus; s__Ruminococcus flavefaciens_B"],
-                                  ["G900119535", "d__Bacteria; p__Firmicutes_A; c__Clostridia; o__Oscillospirales; f__Ruminococcaceae; g__Ruminococcus; s__Ruminococcus flavefaciens_H"]],
-                                 columns=['id', 'lineage'])
-        ltp_data = pd.DataFrame([["AM915269", "Bacteria; Firmicutes_A; Clostridia; Oscillospirales; Ruminococcaceae; Ruminococcus; Ruminococcus flavefaciens"],
-                                 ["X94967", "Bacteria; Firmicutes_A; Clostridia; Oscillospirales; Ruminococcaceae; Ruminococcus; Ruminococcus gnavus"],
-                                 ["EF529620", "Bacteria; Firmicutes_A; Clostridia; Oscillospirales; Ruminococcaceae; Ruminococcus; Ruminococcus gauvreauii"],
-                                 ["L76600", "Bacteria; Firmicutes_A; Clostridia; Oscillospirales; Ruminococcaceae; Ruminococcus; Ruminococcus bromii"],
-                                 ["L76596", "Bacteria; Firmicutes_A; Clostridia; Oscillospirales; Ruminococcaceae; Ruminococcus; Ruminococcus callidus"]],
-                                columns=['id', 'lineage'])
-        parse_lineage(gtdb_data)
-        parse_lineage(ltp_data)
+    def test_poly_species(self):
+        tests = [('s__foo bar', ('s__foo', None, 'bar', None)),
+                 ('s__foo_A bar', ('s__foo', '_A', 'bar', None)),
+                 ('s__foo bar_A', ('s__foo', None, 'bar', '_A')),
+                 ('s__foo_A bar_B', ('s__foo', '_A', 'bar', '_B')),
+                 ('s__foo-A bar_B', ('s__foo-A', None, 'bar', '_B')),
+                 ('s__foo_A bar-B', ('s__foo', '_A', 'bar-B', None)),
+                 ('s__foo_ABC bar_XYZ', ('s__foo', '_ABC', 'bar', '_XYZ'))]
 
-        exp = ltp_data.copy()
-        obs = remove_unmappable_polyphyletic(gtdb_data, ltp_data)
-        obs.index = list(range(len(obs)))
-        pdt.assert_frame_equal(obs, exp)
+        for in_, exp in tests:
+            match = POLY_SPECIES.match(in_)
+            self.assertTrue(match is not None)
+            self.assertEqual(match.groups(), exp)
+
+        tests = ['g__foo',
+                 's__foo bar baz',
+                 's__foo',
+                 's__']
+        for in_ in tests:
+            match = POLY_SPECIES.match(in_)
+            self.assertEqual(match, None)
+
+    def test_poly_general(self):
+        tests = [('d__foo', ('d__foo', None)),
+                 ('p__foo_A', ('p__foo', '_A')),
+                 ('p__foo-A', ('p__foo-A', None)),
+                 ('f__foo_ABC', ('f__foo', '_ABC'))]
+
+        for in_, exp in tests:
+            match = POLY_GENERAL.match(in_)
+            self.assertTrue(match is not None)
+            self.assertEqual(match.groups(), exp)
+
+        tests = ['p__foo bar',
+                 'p__foo bar baz',
+                 's__foo bar',
+                 'p__']
+        for in_ in tests:
+            match = POLY_GENERAL.match(in_)
+            self.assertEqual(match, None)
+
+    def test_get_polyphyletic(self):
+        df = pd.DataFrame([
+            ["x1", "d__X; p__X; c__X; o__X; f__X; g__X; s__X X"],
+            ["x2", "d__X; p__X_A; c__X; o__X; f__X; g__X; s__X X"],
+            ["x3", "d__X; p__Y; c__X; o__X; f__X; g__X; s__X X"],
+            ["x4", "d__X; p__Y; c__X; o__X; f__X; g__X; s__X X"],
+            ["x5", "d__X; p__Z_B; c__X; o__X; f__X; g__X; s__X X"],
+            ["x6", "d__X; p__Y; c__X; o__X; f__X; g__X_A; s__X_A X"],
+            ["x7", "d__X; p__Y; c__X; o__X; f__X; g__X; s__Y X"],
+            ["x8", "d__X; p__Y; c__X; o__X; f__X; g__X; s__Y X_A"],
+            ["x9", "d__X; p__Y; c__X; o__X; f__X; g__X; s__Z X"]],
+            columns=['id', 'lineage'])
+        parse_lineage(df)
+        exp = {'domain': set(),
+               'phylum': {'X', 'Z'},
+               'class': set(),
+               'order': set(),
+               'family': set(),
+               'genus': {'X', },
+               'species': {'X X', 'Y X'}}
+        obs = get_polyphyletic(df)
+        self.assertEqual(obs, exp)
+
+    def test_ids_of_ambiguity_from_polyphyletic(self):
+        gtdb = pd.DataFrame([
+            ["x1", "d__Xa; p__Xb; c__Xc; o__Xd; f__Xe; g__Xf; s__Xf Xg"],
+            ["x2", "d__Xa; p__Xb; c__Xc; o__Xd; f__Xe; g__Xf; s__Xf Xh"],
+            ["x3", "d__Xa; p__Xb; c__Xc; o__Xd; f__Xe; g__Xi; s__Xi Xj"],
+            ["x4", "d__Xa; p__Xb; c__Xc; o__Xd; f__Xe; g__Xi_A; s__Xi_A Xj"],
+            ["x5", "d__Xa; p__Xb; c__Xc; o__Xd; f__Xe; g__Xk; s__Xk Xl_A"],
+            ["x6", "d__Xa; p__Xo_A; c__Xp; o__Xq; f__Xr; g__Xm; s__Xm Xn"],
+            ["x7", "d__Xa; p__Xo_A; c__Xp; o__Xq; f__Xr; g__Xm; s__Xm Xz_B"]],
+            columns=['id', 'lineage'])
+        parse_lineage(gtdb)
+        poly = get_polyphyletic(gtdb)
+        poly_exp = {'domain': set(),
+                    'phylum': {'Xo', },
+                    'class': set(),
+                    'order': set(),
+                    'family': set(),
+                    'genus': {'Xi', },
+                    'species': {'Xi Xj', 'Xk Xl', 'Xm Xz'}}
+        self.assertEqual(poly, poly_exp)
+
+        ltp = pd.DataFrame([
+            ["y1", "Xa;Xb;Xc;Xd;Xe;Xf;Xf Xg"],
+            ["y2", "Xa;Xb;Xc;Xd;Xe;Xf;Xf Xh"],
+            ["y3", "Xa;Xb;Xc;Xd;Xe;Xf;Xi Xj"],
+            ["y4", "Xa;Xb;Xc;Xd;Xe;Xf;Xk Xl"],
+            ["y5", "Xa;Xo;Xp;Xq;Xr;Xm;Xm Xn"],
+            ["y6", "Xa;Xo;Xp;Xq;Xr;Xm;Xm Xz"],
+            ["y7", "Xb;X1;X2;X3;X4;X5;X6 X7"],
+            ["y8", "Xb;X1;X2;X3;X4;X5;X6 X8"]],
+            columns=['id', 'lineage'])
+        parse_lineage(ltp)
+        obs = ids_of_ambiguity_from_polyphyletic(ltp, poly)
+        exp = {'y3', 'y4', 'y5', 'y6'}
+        self.assertEqual(obs, exp)
 
     def test_graft_from_other(self):
         other = skbio.TreeNode.read(["((a,b)c,(d,e)f);"])
@@ -47,28 +123,6 @@ class BackboneTaxonomyTests(unittest.TestCase):
         self.assertEqual(['a', 'b'],
                          sorted([n.name for n in lookup['c'].children]))
         self.assertEqual(['d', 'e'], [n.name for n in lookup['f'].children])
-
-    def test_carryover(self):
-        tree = skbio.TreeNode.read(["((a,b)p__c,(d,f)c__g);"])
-        tax = pd.DataFrame([['t1', 'x', 'c', 'x', 'x', 'x', 'x', 'x'],
-                            ['t2', 'x', 'c', 'x', 'x', 'x', 'x', 'x'],
-                            ['t3', 'x', 'c', 'g', 'x', 'x', 'x', 'x'],
-                            ['t4', 'x', 'x', 'g', 'x', 'x', 'x', 'x'],
-                            ['t5', 'x', 'x', 'y', 'x', 'x', 'x', 'x'],
-                            ['t6', 'x', 'x', 'y', 'x', 'x', 'x', 'x']],
-                           columns=['id'] + LEVELS)
-        lookup = {'p__c': skbio.TreeNode(name='lookup-c'),
-                  'c__g': skbio.TreeNode(name='lookup-g')}
-        carryover(tax, tree, lookup)
-        self.assertEqual(lookup['p__c'].children[0].name, 'c__')
-        self.assertEqual(lookup['p__c'].children[0].children[0].name, 'o__')
-        self.assertEqual(lookup['p__c'].children[0].children[0].children[0].name, 'f__')
-        self.assertEqual(lookup['p__c'].children[0].children[0].children[0].children[0].name, 'g__')
-        self.assertEqual(lookup['p__c'].children[0].children[0].children[0].children[0].children[0].name, 's__')
-        s = lookup['p__c'].children[0].children[0].children[0].children[0].children[0]
-        self.assertEqual(['t1', 't2'], sorted([n.name for n in s.children]))
-        s = lookup['c__g'].children[0].children[0].children[0].children[0]
-        self.assertEqual(['t3', 't4'], sorted([n.name for n in s.children]))
 
 
 if __name__ == '__main__':
