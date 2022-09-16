@@ -35,7 +35,6 @@ if [[ -f backbone/${v}/secondary_taxonomy.tsv ]]; then
     t2t decorate -m backbone/${v}/taxonomy.tsv \
         -o ${b}/${t}/${declabel} \
         -p ${b}/${t}/placement.rt.jplace \
-        --use-node-id \
         --secondary-taxonomy backbone/${v}/secondary_taxonomy.tsv \
         --recover-polyphyletic \
         --correct-binomials \
@@ -44,7 +43,6 @@ else
     t2t decorate -m backbone/${v}/taxonomy.tsv \
         -o ${b}/${t}/${declabel} \
         -p ${b}/${t}/placement.rt.jplace \
-        --use-node-id \
         --correct-binomials \
         --min-count 1 
 fi

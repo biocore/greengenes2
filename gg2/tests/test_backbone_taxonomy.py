@@ -95,15 +95,15 @@ class BackboneTaxonomyTests(unittest.TestCase):
         self.assertEqual(poly, poly_exp)
 
         ltp = pd.DataFrame([
-            ["y1", "Xa;Xb;Xc;Xd;Xe;Xf;Xf Xg"],
-            ["y2", "Xa;Xb;Xc;Xd;Xe;Xf;Xf Xh"],
-            ["y3", "Xa;Xb;Xc;Xd;Xe;Xf;Xi Xj"],
-            ["y4", "Xa;Xb;Xc;Xd;Xe;Xf;Xk Xl"],
-            ["y5", "Xa;Xo;Xp;Xq;Xr;Xm;Xm Xn"],
-            ["y6", "Xa;Xo;Xp;Xq;Xr;Xm;Xm Xz"],
-            ["y7", "Xb;X1;X2;X3;X4;X5;X6 X7"],
-            ["y8", "Xb;X1;X2;X3;X4;X5;X6 X8"]],
-            columns=['id', 'lineage'])
+            ["y1", "Xa;Xb;Xc;Xd;Xe;Xf;Xf Xg", False],
+            ["y2", "Xa;Xb;Xc;Xd;Xe;Xf;Xf Xh", False],
+            ["y3", "Xa;Xb;Xc;Xd;Xe;Xf;Xi Xj", False],
+            ["y4", "Xa;Xb;Xc;Xd;Xe;Xf;Xk Xl", False],
+            ["y5", "Xa;Xo;Xp;Xq;Xr;Xm;Xm Xn", False],
+            ["y6", "Xa;Xo;Xp;Xq;Xr;Xm;Xm Xz", False],
+            ["y7", "Xb;X1;X2;X3;X4;X5;X6 X7", False],
+            ["y8", "Xb;X1;X2;X3;X4;X5;X6 X8", False]],
+            columns=['id', 'lineage', 'explicitly_set'])
         parse_lineage(ltp)
         obs = ids_of_ambiguity_from_polyphyletic(ltp, poly)
         exp = {'y3', 'y4', 'y5', 'y6'}
