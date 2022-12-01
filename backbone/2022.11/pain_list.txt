@@ -1,0 +1,70 @@
+# X60418  d__Bacteria; p__Proteobacteria; c__Gammaproteobacteria; o__Enterobacterales; f__; g__; s__
+# KY471008    d__Bacteria; p__Desulfobacterota; c__; o__; f__; g__; s__
+# AM072763    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+# CP001022    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+# DQ019165    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+# AB105164    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+# DQ019164    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+# AY864633    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+DQ019167    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+AJ846291    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+JF893462    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+EU379016    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+AB680657    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+JF775503    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+AM072764    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+AY594266    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+AY818050    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+AY594264    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+MH375463    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+HM103931    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+HM103934    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+L14326  d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+L14327  d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+Y13364  d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+Y13365  d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+AJ251987    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+EU427463    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+Y17280  d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+AJ242495    d__Bacteria; p__Firmicutes; c__Bacilli; o__Caryophanales; f__; g__; s__
+AY272039    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+KX822012    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AB037875    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AB021702    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AB037874    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+CP016199    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+Z36296  d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AB298771    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AJ251215    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+KJ420408    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+LM999901    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AF050099    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+FR851323    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AF016691    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+HM587321    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+JN837487    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+GQ461828    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AF358114    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+L11305  d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AJ404680    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AB598276    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AF433166    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AB218661    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+U21809  d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+EF190921    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AY064218    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AF203703    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AY673988    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AY061974    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+GU584133    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AB061441    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AF343566    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AY936496    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+CP002344    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+AB454087    d__Bacteria; p__Firmicutes; c__Clostridia; o__Eubacteriales; f__; g__; s__
+CP002360    d__Bacteria; p__Firmicutes; c__Clostridia; o__Thermoanaerobacterales; f__; g__; s__
+KC794015    d__Bacteria; p__Firmicutes; c__Clostridia; o__Halanaerobiales; f__; g__; s__
+EU386162    d__Bacteria; p__Firmicutes; c__Clostridia; o__; f__; g__; s__
+HQ452857    d__Bacteria; p__Firmicutes; c__; o__; f__; g__; s__
+MN602556    d__Bacteria; p__Firmicutes; c__; o__; f__; g__; s__
+AB364473    d__Bacteria; p__Spirochaetota; c__Spirochaetia; o__Spirochaetales; f__; g__; s__
