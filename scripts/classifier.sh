@@ -40,7 +40,7 @@ qiime feature-classifier fit-classifier-naive-bayes \
     --i-reference-taxonomy ${b}/${v}.backbone.tax.qza \
     --o-classifier ${b}/${v}.backbone.v4.nb.qza
 
-#qiime feature-classifier fit-classifier-naive-bayes \
-#    --i-reference-reads ${b}/${v}.backbone.full-length.fna.qza \
-#    --i-reference-taxonomy ${b}/${v}.backbone.tax.qza \
-#    --o-classifier ${b}/${v}.backbone.full-length.nb.qza
+qiime feature-classifier fit-classifier-naive-bayes \
+    --i-reference-reads ${b}/${v}.backbone.full-length.fna.qza \
+    --i-reference-taxonomy ${b}/${v}.backbone.tax.qza \
+    --o-classifier ${b}/${v}.backbone.full-length.nb.qza
