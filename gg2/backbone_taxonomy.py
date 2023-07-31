@@ -1,12 +1,329 @@
+#!/usr/bin/env python
+"""Integrate GTDB and LTP taxonomies
+
+This script is difficult. It's primary responsiblity is to integrate two
+different taxonomic systems. It's seconadary goal is to emit reasonable
+NCBI tax IDs for the entries. The complexity stems from the following:
+
+    * There are numerous error modes in input dataset, many of which
+        may derive from human error as they are largely not systematic.
+        As a result, there is a substantial amount of code dedicated
+        to special casing error handling.
+    * LTP and GTDB taxonomies are fundamentally different. We attempt to
+        bridge the taxonomies in multiple ways. First, we use NCBI mappings
+        provided by GTDB, for its representatives and reported NCBI type
+        material, to infer lineages relative to GTDB for many species. This
+        allows for many species names to be directly mapped from LTP into
+        GTDB. Second, for species, genera, etc which are in LTP but not in
+        not in GTDB (e.g., doesn't have a sequenced genome), we construct
+        rewrite rules from species up, based on the NCBI / GTDB bridge
+        we construct from the GTDB metadata. Following rewrites, we graft
+        the LTP taxonomic entries to the GTDB hierarchy, allowing us to
+        express novel lineages within GTDB.
+    * GTDB does not always use the NCBI name, in some cases it falls on
+        a basionym or homotypic synonym, this resulted in manually assessing
+        many records.
+    * WOL uses GTDB, but not all entries in WOL are in GTDB, and a handful
+        of cases, the WOL entries are remarked as historical by Genbank/RefSeq
+
+Because of the special case nature of many of the error modes, much of the code
+is exceedingly difficult to test. To mitigate the introduction of errors, the
+code attempts to be defensive where feasible, and testing edge cases at runtime.
+
+This script can absolutely be refactored. It is spaghetti due to the ad hoc
+discovery of many of the error modes, and the repeated revisions to error
+resolution.
+"""
+
 import click
 import bp
 import pandas as pd
 from t2t.nlevel import make_consensus_tree, pull_consensus_strings
 from functools import partial
 import skbio
-from fuzzywuzzy import fuzz
 import re
 from collections import defaultdict
+import ete3
+
+
+# We either could not directly obtain an NCBI tax ID from GTDB for these records
+# or the name was not completely resolvable
+# {id: (old name, new name, tax_id)}
+MANUAL_GTDB_TAXID_ASSESSMENT = {
+    'G000420225': ('Mycoplasma moatsii', 'Mesomycoplasma moatsii', 171287),
+    'G001007625': ('Synechococcus spongiarum', 'Synechococcus spongiarum', 431041),
+    'G008634845': ('Ordinivivax streblomastigis', 'Ordinivivax streblomastigis', 2540710),
+    'G003995005': ('Halichondribacter symbioticus', 'Halichondribacter symbioticus', 2494554),
+    'G000315095': ('Kuenenia stuttgartiensis', 'Kuenenia stuttgartiensis', 174633),
+    'G900660435': ('Mycoplasma orale', 'Metamycoplasma orale', 2121),
+    'G001684175': ('Glomeribacter gigasporarum', 'Glomeribacter gigasporarum', 132144),
+    'G001180145': ('Pelagibacter ubique', 'Pelagibacter ubique', 198252),
+    'G000375745': ('Nitromaritima sp. AB-629-B06', 'Nitromaritima sp. AB-629-B06', 1131270),
+    'G000375765': ('Nitromaritima sp. AB-629-B18', 'Nitromaritima sp. AB-629-B18', 1131269),
+    'G001584765': ('Mycobacterium simiae', 'Mycobacterium simiae', 1784),
+	'G900660435': ('Mycoplasma orale', 'Metamycoplasma orale', 2121),
+	'G000315095': ('Kuenenia stuttgartiensis', 'Kuenenia stuttgartiensis', 174633),
+}
+
+# the gtdb failures file doesn't provide as much information as the webpage
+# TBH this could, and should, be wrapped into the MANUAL_GTDB_TAXID_ASSESSMENT
+# object...
+MANUAL_GTDB_FAILURES = {
+    'G000252705': ('Arthromitus sp. SFB-3', 1054944),
+    'G000341755': ('Flavobacterium sp. MS220-5C', 926447),
+    'G000409605': ('Microbacterium sp. AO20a11', 1201038),
+    'G000463735': ('Chitinophaga sp. JGI 0001002-D04', 1235985),
+    'G000483005': ('Variovorax sp. JGI 0001016-M12', 1286832),
+    'G000800935': ('Methylobacterium sp. ZNC0032', 1339244),
+    'G000955975': ('Saccharothrix sp. ST-888', 1427391),
+    'G000980745': ('Candidatus Caldipriscus sp. T1.1', 1643674),
+    'G001044495': ('Candidatus Nitromaritima sp. SCGC AAA799-C22', 1628279),
+    'G001044505': ('Candidatus Nitromaritima sp. SCGC AAA799-A02', 1628278),
+    'G001292585': ('Candidatus Magnetomorum sp. HK-1', 1509431),
+    'G001313045': ('Nocardioides sp. JCM 18999', 1301083),
+    'G001799425': ('Desulfobacula sp. RIFOXYA12_FULL_46_16', 1797911),
+    'G001829755': ('Sulfurimonas sp. RIFOXYB2_FULL_37_5', 1802257),
+    'G001829775': ('Sulfurimonas sp. RIFOXYC2_FULL_36_7', 1802258),
+    'G002010445': ('Dehalococcoides sp. JdFR-57', 1935050),
+    'G003030645': ('Marinobacter sp. Z-F4-2', 2137199),
+    'G004127505': ('Salmonella sp. 3DZ2-4SM', 2175006),
+    'G004961165': ('Mesorhizobium sp.', 1871066),
+    'G004961685': ('Mesorhizobium sp.', 1871066),
+    'G004961775': ('Mesorhizobium sp.', 1871066),
+    'G004962305': ('Mesorhizobium sp.', 1871066),
+    'G004962345': ('Mesorhizobium sp.', 1871066),
+    'G004962385': ('Mesorhizobium sp.', 1871066),
+    'G004963055': ('Mesorhizobium sp.', 1871066),
+    'G004963865': ('Mesorhizobium sp.', 1871066),
+    'G004964325': ('Mesorhizobium sp.', 1871066),
+    'G004964405': ('Mesorhizobium sp.', 1871066),
+    'G004964655': ('Mesorhizobium sp.', 1871066),
+    'G004964895': ('Mesorhizobium sp.', 1871066),
+    'G004964905': ('Mesorhizobium sp.', 1871066),
+    'G004965145': ('Mesorhizobium sp.', 1871066),
+    'G004965155': ('Mesorhizobium sp.', 1871066),
+    'G004965175': ('Mesorhizobium sp.', 1871066),
+    'G004965225': ('Mesorhizobium sp.', 1871066),
+    'G004965685': ('Mesorhizobium sp.', 1871066),
+    'G005063255': ('Mesorhizobium sp.', 1871066),
+    'G005063315': ('Mesorhizobium sp.', 1871066),
+    'G005117065': ('Mesorhizobium sp.', 1871066),
+    'G007581405': ('Salmonella enterica subsp. diarizonae', 59204),
+    'G008273775': ('Escherichia coli', 562),
+    'G008349105': ('Campylobacter jejuni', 197),
+    'G012161415': ('Escherichia albertii', 208962),
+    'G012357415': ('Escherichia coli', 562),
+    'G901564725': ('Streptococcus pyogenes', 1314),
+    'G902536535': ('uncultured Polaribacter sp.', 174711),
+    'G902590875': ('uncultured Candidatus Actinomarina sp.', 1985113),
+}
+
+
+# We either could not directly obtain an NCBI tax ID for these records
+# or the name was not completely resolvable
+# {id: (old name, new name, tax_id)}
+MANUAL_LTP_TAXID_ASSESSMENT = {
+    'KJ606916': ('Yersinia rochesterensi', 'Yersinia rochesterensis', 1604335),
+    'JN175340': ('Haemophilus piscium', 'Haemophilus piscium', 80746),  # Haemophilus piscium corrig. Snieszko et al. 1950
+    'MK007076': ('Alteromonas fortis', 'Alteromonas fortis', 226),  # No tax ID, using genus tax id, https://lpsn.dsmz.de/species/alteromonas-fortis
+    'MT180568': ('Halomonas bachuensi', 'Halomonas bachuensis', 2717286),
+    'LR797591': ('Pseudomonas neuropathic', 'Pseudomonas neuropathica', 2730425),
+    'CP002881': ('Pseudomonas stutzeri', 'Pseudomonas stutzeri', 316),   # Stutzerimonas stutzeri per NCBI (taxid 316), however GTDB and LPSN still use Pseudomonas stutzeri
+    'CP000267': ('Albidiferax ferrireducens', 'Rhodoferax ferrireducens', 192843),
+    'AB021399': ('Pseudomonas cissicola', 'Xanthomonas cissicola', 86186),
+    'AB021404': ('Stenotrophomonas geniculata', 'Stenotrophomonas geniculata', 86188),
+    'HE860713': ('Ruegeria litorea', 'Ruegeria litorea', 1280831),   # Renamed, but GTDB uses Ruegeria litorea
+    'LN810645': ('Cereibacter alkalitolerans', 'Luteovulum alkalitolerans', 1608950),   # Not found anywhere. Genbank uses "[Luteovulum] alkalitolerans" and is supported by LPSN
+    'KY310591': ('Altericroceibacterium endophyticus', 'Altericroceibacterium endophyticum', 1808508),
+    'KX129901': ('Allorhizobium oryziradicis', 'Allorhizobium oryziradicis', 1867956),
+    'EF440185': ('Rhizobium selenitireducens', 'Allorhizobium selenitireducens', 448181),   # basionym with Ciceribacter selenitireducens, however GTDB appears to use Allorhizobium for genus
+    'MH355952': ('Komagataeibacter pomaceti', 'Komagataeibacter cocois', 1747507),   # basionym with Novacetimonas, GTDB appears to have renamed type material, https://gtdb.ecogenomic.org/genome?gid=GCF_003207955.1
+    'X75620': ('Komagataeibacter hansenii', 'Komagataeibacter hansenii', 436),   # basionym with Acetobacter hansenii, GTDB uses Komagataeibacter hansenii, https://gtdb.ecogenomic.org/genome?gid=GCF_003207935.1
+    'L14624': ('Arcobacter cryaerophilus', 'Aliarcobacter cryaerophilus', 28198),
+    'AF418179': ('Nitratidesulfovibrio vulgaris', 'Nitratidesulfovibrio vulgaris', 881),
+    'DQ296030': ('Humidesulfovibrio arcti', 'Humidesulfovibrio arcticus', 360296),
+    'CP001087': ('Desulfobacterium autotrophicum', 'Desulfobacterium autotrophicum', 2296),
+    'U96917': ('Geomonas bremense', 'Citrifermentans bremense', 60035),   # basionym is Geobacter bremensis (https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?mode=Info&id=60035&lvl=3&lin=f&keep=1&srchmode=1&unlock)
+    'DQ991964': ('Seleniibacterium seleniigenes', 'Seleniibacterium seleniigenes', 407188),   # NCBI uses Pelobacter seleniigenes, but GTDB uses Seleniibacterium seleniigenes
+    'ADMV01000001': ('Streptococcus oralis oralis subsp. oralis', 'Streptococcus oralis subsp. oralis', 1891914),
+    'KY019172': ('Staphylococcus ursi', 'Staphylococcus sp010365305', 1912064),   # Ursi in LPSN https://lpsn.dsmz.de/species/staphylococcus-ursi, GTDB maps this to Staphylococcus sp010365305 (https://gtdb.ecogenomic.org/genome?gid=GCF_010365305.1)
+    'AB009936': ('Staphylococcus urealyticus', 'Staphylococcus ureilyticus', 94138),
+    'AM747813': ('Brevibacterium frigoritolerans', 'Peribacillus frigoritolerans', 450367),   # basionym is Brevibacterium frigoritolerans
+    'KX865139': ('Niallia endozanthoxylicus', 'Niallia endozanthoxylica', 2036016),
+    'AB021189': ('Lederbergia lentus', 'Bacillus lentus', 1467),   # GTDB uses basionym Bacillus lentus (https://gtdb.ecogenomic.org/genome?gid=GCF_001591545.1)
+    'HQ433466': ('Litchfieldia salsus', 'Litchfieldia salsa', 930152),
+    'KF265350': ('Rossellomorea enclensis', 'Rossellomorea enclensis', 1402860),
+    'MH454613': ('Bacillus salinus', 'HMF5848 sp003944835', 1409),   # GTDB uses the sp name (https://gtdb.ecogenomic.org/genome?gid=GCF_900094975.1")
+    'KU201962': ('Paenibacillus cucumis', 'Paenibacillus cucumis', 1776858),   # Note this is a duplicated binomial (https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=1776858)
+    'DQ504377': ('Salibacterium aidingensis', 'Salibacterium aidingense', 384933),
+
+	# note genus change, consistent with other shouchella, see https://www.ncbi.nlm.nih.gov/nuccore/HM054473 for an example
+    'HM054473': ('Shouchella hunanensis', 'Alkalihalobacillus hunanensis', 766894),
+    'HM054474': ('Shouchella xiaoxiensis', 'Alkalihalobacillus xiaoxiensis', 766895),
+    'HQ620634': ('Shouchella shacheensis', 'Alkalihalobacillus shacheensis', 1649580),
+    'AY258614': ('Shouchella patagoniensis', 'Alkalihalobacillus patagoniensis', 228576),
+    'CP019985': ('Shouchella clausii', 'Alkalihalobacillus clausii', 79880),
+    'X76446': ('Shouchella gibsonii', 'Alkalihalobacillus gibsonii', 79881),
+
+	# note genus change, consistent with other halalkalibacter, see https://www.ncbi.nlm.nih.gov/nuccore/AB086897 for an example
+    'AB086897': ('Halalkalibacter krulwichiae', 'Alkalihalobacillus krulwichiae', 199441),
+    'AB043851': ('Halalkalibacter wakoensis', 'Alkalihalobacillus wakoensis', 127891),
+    'AB043858': ('Halalkalibacter akibai', 'Alkalihalobacillus akibai', 1411),
+    'AJ606037': ('Halalkalibacter alkalisediminis', 'Alkalihalobacillus alkalisediminis', 935616),
+    'LN610501': ('Halalkalibacter kiskunsagensis', 'Alkalihalobacillus kiskunsagensis', 1548599),
+    'KR611043': ('Halalkalibacter oceani', 'Alkalihalobacillus oceani', 1653776),
+    'KY612314': ('Halalkalibacter urbisdiaboli', 'Alkalihalobacillus urbisdiaboli', 1960589),
+    'GQ292773': ('Halalkalibacter nanhaiisediminis', 'Alkalihalobacillus nanhaiisediminis', 688079),
+
+	# note genus change, Basionym genus is Mycoplasma
+    'FJ226577': ('Mycoplasmopsis gallopavoni', 'Mycoplasmopsis gallopavonis', 76629),
+    'AF412976': ('Mycoplasmopsis cricetul', 'Mycoplasmopsis cricetuli', 171283),
+    'M23940': ('Mycoplasmoides pirum', 'Mycoplasmoides pirum', 2122),
+    'FJ655918': ('Mycoplasmoides alvi', 'Mycoplasmoides alvi', 78580),
+    'AB680686': ('Mycoplasmoides gallisepticum', 'Mycoplasmoides gallisepticum', 2096),
+    'AAGX01000019': ('Mycoplasmoides genitalium', 'Mycoplasmoides genitalium', 2097),
+    'AF125878': ('Mycoplasmoides fastidiosum', 'Mycoplasmoides fastidiosum', 92758),
+
+    'M23933': ('Acholeplasma modicum', 'Acholeplasma modicum', 2150),
+    'AUAL01000024': ('Acholeplasma axanthum', 'Acholeplasma axanthum', 29552),
+
+	# GTDB uses the homotypic synonym
+    'ABOU02000049': ('Ruminococcus lactaris', 'Mediterraneibacter lactaris', 46228),
+    'AAVP02000040': ('Ruminococcus torques', 'Mediterraneibacter torques', 33039),
+    'X94967': ('Ruminococcus gnavus', 'Mediterraneibacter gnavus', 33038),
+    'MG780325': ('Mycobacterium chelonae', 'Mycobacterium chelonae', 1774),
+    'AY457067': ('Mycobacterium houstonense', 'Mycobacterium houstonense', 146021),
+    'AY457084': ('Mycobacterium farcinogenes', 'Mycobacterium farcinogenes', 1802),
+
+    'MK085088': ('Nocardioides lijunqinia', 'Nocardioides lijunqiniae', 2760832),
+    'U30254': ('Clavibacter tessellarius', 'Clavibacter tessellarius', 31965),
+    'U09761': ('Clavibacter insidiosus', 'Clavibacter insidiosus', 33014),
+    'HE614873': ('Clavibacter nebraskensis', 'Clavibacter nebraskensis', 31963),
+    'CP012573': ('Clavibacter capsici', 'Clavibacter capsici', 1874630),
+    'AM849034': ('Clavibacter sepedonicus', 'Clavibacter sepedonicus', 31964),
+    'AB012590': ('Zimmermannella alba', 'Pseudoclavibacter alba', 272241),   # https://gtdb.ecogenomic.org/genome?gid=GCF_001570905.1
+    'MG200147': ('Geodermatophilus marinus', 'Geodermatophilus marinus', 1663241),
+    'FN178463': ('Olsenella umbonata', 'Parafannyhessea umbonata', 604330),   # https://gtdb.ecogenomic.org/genome?gid=GCF_900105025.1
+    'MT556637': ('Fortiea necridiiformans', 'Fortiea necridiiformans', 2741322),
+    'MK300544': ('Nostoc neudorfense', 'Nostoc neudorfense', 1245825),
+    'LC329340': ('Spongiibacterium fuscum', 'Coraliitalea coralii', 499064),   # https://www.ncbi.nlm.nih.gov/nuccore/LC329340
+    'MN955413': ('Chryseobacterium caseinilyticu', 'Chryseobacterium caseinilyticum', 2771428),
+    'GQ259742': ('Chryseobacterium yonginense', 'Kaistella yonginensis', 658267),   # basionym is Chryseobacterium yonginense, GTDB seems to use revised genus
+    'MF983698': ('Kaistella flava', 'Kaistella flava', 2038776),
+    'AB682225': ('Chryseobacterium palustre', 'Kaistella palustris', 493376),   # https://gtdb.ecogenomic.org/genome?gid=GCF_000422265.1
+    'EU516352': ('Chryseobacterium solincola', 'Kaistella solincola', 510955),   # https://gtdb.ecogenomic.org/genome?gid=GCF_000812875.1
+    'FJ713810': ('Chryseobacterium buanense', 'Soonwooa buanensis', 619805),   # https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?mode=Info&id=619805&lvl=3&lin=f&keep=1&srchmode=1&unlock
+    'MG768961': ('Pedobacter pollutisol', 'Pedobacter pollutisoli', 2707017),
+    'MN381950': ('Pedobacter riviphilus', 'Pedobacter riviphilus', 2606215),
+    'GQ339899': ('Pseudoflavitalea ginsenosidimutans', 'Pseudobacter ginsenosidimutans', 661488),   # https://gtdb.ecogenomic.org/genome?gid=GCF_007970185.1
+    'AB278570': ('Chitinophaga terrae', 'Chitinophaga terrae', 408074),
+
+	# note genus change, others consistent, see as an example https://gtdb.ecogenomic.org/genome?gid=GCF_014201705.1
+    'HE582779': ('Borrelia spielmanii', 'Borreliella spielmanii', 88916),
+    'D67023': ('Borrelia tanukii', 'Borreliella tanukii', 56146),
+    'D67022': ('Borrelia turdi', 'Borreliella turdi', 57863),
+
+    'EU580141': ('Treponema caldarium', 'Treponema caldarium', 215591),   # GTDB uses the homotypic synonym, https://gtdb.ecogenomic.org/genome?gid=GCF_000219725.1
+    'FR733664': ('Treponema stenostreptum', 'Spirochaeta stenostrepta', 152),   # GTDB has the genus represented, https://gtdb.ecogenomic.org/searches?s=al&q=g__Spirochaeta; using binomial from genbank record https://www.ncbi.nlm.nih.gov/nuccore/FR733664
+    'GU434243': ('Streptomyces albidus', 'Streptomyces albidus', 722709),
+    'MN620389': ('Ramlibacter terrae', 'Ramlibacter terrae', 174951),   # https://lpsn.dsmz.de/species/ramlibacter-terrae; using genus tax id
+    'MN620391': ('Ramlibacter montanisoli', 'Ramlibacter montanisoli', 174951),   # https://lpsn.dsmz.de/species/ramlibacter-montanisoli; using genus tax id
+    'MN911321': ('Hymenobacter taeanensis', 'Hymenobacter taeanensis', 89966),   # https://lpsn.dsmz.de/species/hymenobacter-taeanensis; using genus tax id
+    'MW811459': ('Jiella mangrovi', 'Jiella mangrovi', 1775688),   # https://lpsn.dsmz.de/species/jiella-mangrovi; using genus tax id
+    'MZ041112': ('Phycicoccus avicenniae', 'Phycicoccus avicenniae', 367298),  # https://lpsn.dsmz.de/species/phycicoccus-avicenniae; using genus tax id
+    'MW540506': ('Bifidobacterium choladohabitan', 'Bifidobacterium choladohabitans', 2750947),
+    'CP077075': ('Pseudomonas xanthosomatis', 'Pseudomonas xanthosomae', 2842356),
+    'CP077078': ('Pseudomonas azerbaijanorientalis', 'Pseudomonas azerbaijanoriens', 2842350),
+    'JAHSTU000000000': ('Pseudomonas azerbaijanoccidentalis', 'Pseudomonas azerbaijanoccidens', 2842347),
+    'MH043116': ('Hydrogeniiclostridium mannosilyticum', 'Hydrogeniiclostridium mannosilyticum', 2764322),
+    'KR698371': ('Lysobacter humi', 'Lysobacter humi', 1720254),
+    'EU560726': ('Micromonospora endophytica', 'Micromonospora endophytica', 515350),
+    'KT962840': ('Nocardioides flavus', 'Nocardioides flavus', 2058780),
+    'JN399173': ('Novosphingobium aquaticum', 'Novosphingobium aquaticum', 1117703),
+    'AB244764': ('Sphingobacterium composti', 'Sphingobacterium composti', 363260),
+    'AB245347': ('Sphingomonas ginsengisoli', 'Sphingomonas ginsengisoli', 363835),
+	'KX987135': ('Brenneria populi subsp. brevivirga', 'Brenneria populi subsp. brevivirga', 2036006),
+    'KJ632518': ('Brenneria populi subsp. populi', 'Brenneria populi subsp. populi', 1505588),
+}
+
+    # ETE3 missed these due to extra whitespace in the LTP input file
+    #'Pseudomonas nicosulfuronedens': ('nan', nan),  # ETE3 missed this?
+    #'Qipengyuania flava': ('nan', nan),  # ETE3 missed this?
+    #'Cupidesulfovibrio oxamicus': ('nan', nan),  # ETE3 missed this?
+    #'Streptacidiphilus fuscans': ('nan', nan),  # ETE3 missed?
+    #'Dictyobacter formicarum': ('nan', nan),  # ETE3 missed?
+    #'Croceivirga litoralis': ('nan', nan),  # ETE3 missed?
+    #'Tenacibaculum finnmarkense': ('nan', nan),  # ETE3 missed?
+    #'Corynebacterium zhongnanshanii': ('nan', nan),  # ETE3 missed?
+
+
+def names_to_taxid(names):
+    ncbi = ete3.NCBITaxa()
+
+    name_to_id = ncbi.get_name_translator(names)
+
+    # make sure we have a unique ID, and not a reused name
+    for k, v in list(name_to_id.items()):
+        if not k:
+            print(v)
+            raise ValueError()
+        if len(v) > 1:
+            print("multiple IDs: %s, %s" % (k, v))
+            raise ValueError()
+        else:
+            name_to_id[k] = v[0]
+
+    missing = set(names) - set(name_to_id)
+    missing -= set(['', ])
+
+    # for records missing a name, see if we can recover it by stripping off
+    # a subspecies designation
+    no_subsp = defaultdict(list)
+    missing_names = set()
+    for m in missing:
+        if 'subsp.' in m:
+            no_subsp[m.split(' subsp.')[0]].append(m)
+        else:
+            missing_names.add(m)
+
+    # note that we cannot reliably just try the genus part of the binomoal
+    # as in some cases the organism has changed genera -- I don't know
+    # where to obtain those mappings so I think that needs to be done
+    # manually
+
+    no_subsp_to_ids = ncbi.get_name_translator(list(no_subsp))
+    for k, v in list(no_subsp_to_ids.items()):
+        if not k:
+            print(v)
+            raise ValueError()
+        if len(v) > 1:
+            print("multiple IDs: %s, %s" % (k, v))
+        else:
+            no_subsp_to_ids[k] = v[0]
+
+    missing_no_subsp = set(no_subsp) - set(no_subsp_to_ids)
+
+    for k in missing_no_subsp:
+        missing_names.update(set(no_subsp[k]))
+
+    for k, v in no_subsp_to_ids.items():
+        name_to_id[k] = v
+
+    # placeholder
+    for m in missing_names:
+        name_to_id[m] = None
+
+    # construct a lookup for names modified (e.g., subspecies stripped)
+    lookup = {}
+    for k, original in no_subsp.items():
+        for v in original:
+            lookup[v] = k
+
+    # verify we have names for everything
+    for k, v in name_to_id.items():
+        if v is None:
+            print("Missing for: |%s|" % k)
+    return name_to_id, lookup
 
 
 POLY_GENERAL = re.compile(r"^([dpcofg]__[a-zA-Z0-9-]+)(_[A-Z]+)?$")
@@ -367,9 +684,52 @@ LTP_RENAMES = [
     # https://gtdb.ecogenomic.org/searches?s=al&q=g__Brucella
     {'old': 'Hyphomicrobiales;Brucellaceae;Brucella',
      'new': 'Rhizobiales_A;Rhizobiaceae_A;Brucella'},
+
+    # looks like a bulk rename
+    # see https://gtdb.ecogenomic.org/genome?gid=GCF_900108485.1
+    {'old': 'Chromatiales;Chromatiaceae;Rheinheimera',
+     'new': 'Enterobacterales;Alteromonadaceae;Rheinheimera'},
+
+    # typo in HQ223108
+    {'old': 'Actinomycetota;;Thermoleophilia',
+     'new': 'Actinomycetota;Thermoleophilia'},
+
+    # rewritten in gtdb
+    {'old': 'Acidimicrobiales_incertae_sedis;Aciditerrimonas',
+     'new': 'Acidimicrobiaceae;Aciditerrimonas'},
+
+    # one of the records has a period after the genus
+    {'old': 'Prolixibacteraceae;Aquipluma.',
+     'new': 'Prolixibacteraceae;Aquipluma'},
+
+    # family is incertae sedis in ltp but genus is in gtdb
+    {'old': 'Pseudomonadales_incertae_sedis;Spartinivicinus',
+     'new': 'Pseudomonadales;Zooshikellaceae'},
+
+    # family is incertae sedis in ltp but genus is in gtdb
+    {'old': 'Burkholderiales_incertae_sedis;Inhella',
+     'new': 'Burkholderiaceae;Inhella'},
+
+
 ]
 
 LTP_TO_DROP = {
+    # family incertae sedis and genus is not in GTDB
+    'KF981441',
+    'JN699062',
+    'MG709347',
+    'AP023361',
+    'AM117931',
+    'MK503700',
+    'AB180657',
+
+    # family is incertae sedis, and genus is shown to split in GTDB
+    'LN794224',
+    'KF551137',
+    'AB297965',
+    'AB245356',
+    'KM670026',
+
     # Genus is not in GTDB
     # NCBI taxonomy reports eubacteriales unclassified family XII
     # LPSN is consistent (https://lpsn.dsmz.de/family/eubacteriales-no-family)
@@ -488,6 +848,10 @@ LTP_TO_DROP = {
     'KM025195',
     'DQ298025',
     'LC004727',
+
+    # genus doesn't seem represented in GTDB, and its family is
+    # incertae sedis in ncbi
+    'KF981441',
 }
 
 # LTP has incertae sedis mappings which are not meaningful for decoration.
@@ -501,6 +865,36 @@ LTP_TO_DROP = {
 # capabilities. If there appears to be reclassifications of genus, then we
 # omit the record as we cannot be sure where it falls.
 INCERTAE_SEDIS_MAPPINGS = {
+    # https://gtdb.ecogenomic.org/genome?gid=GCF_003991585.1
+    'KY039174': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Saezia;Saezia sanguinis',
+
+    # https://gtdb.ecogenomic.org/genome?gid=GCF_004217215.1
+    'AM774413': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Rivibacter;Rivibacter subsaxonicus',
+
+    # https://gtdb.ecogenomic.org/genome?gid=GCF_002116905.1
+    'CP024645': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Rhizobacter;Rhizobacter gummiphilus',
+
+    # https://gtdb.ecogenomic.org/genome?gid=GCF_006386545.1
+    'MF687442': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Pseudorivibacter;Pseudorivibacter rhizosphaerae',
+
+    # https://gtdb.ecogenomic.org/genome?gid=GCF_004011805.1
+    'KU667249': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Piscinibacter;Piscinibacter defluvii',
+
+    # https://gtdb.ecogenomic.org/genome?gid=GCA_003265685.1
+    'KX390668': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Piscinibacter;Piscinibacter caeni',
+
+    # https://gtdb.ecogenomic.org/genome?gid=GCA_007994965.1
+    'AB681749': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Piscinibacter;Piscinibacter aquaticus',
+
+    # https://gtdb.ecogenomic.org/genome?gid=GCA_017306535.1
+    'AF176594': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Methylibium;Methylibium petroleiphilum',
+
+    # https://gtdb.ecogenomic.org/genome?gid=GCF_000969605.1
+    'DQ656489': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Aquincola;Aquincola tertiaricarbonis',
+
+    # https://gtdb.ecogenomic.org/genome?gid=GCF_004016505.1
+    'LT594462': 'Bacteria;Proteobacteria;Gammaproteobacteria;Burkholderiales;Burkholderiaceae;Rubrivivax;Rubrivivax rivuli',
+
     # https://gtdb.ecogenomic.org/genome?gid=GCA_003447605.1
     'X60418': 'Bacteria;Proteobacteria;Gammaproteobacteria;Enterobacterales;Enterobacteriaceae;Plesiomonas;Plesiomonas shigelloides',
 
@@ -776,10 +1170,17 @@ def adjust_ltp(ltp_tax, gtdb_unique, ncbi_to_gtdb):
     ltp_tax['lineage'] = ltp_tax.apply(append_species, axis=1)
 
     # tedious manual modifications that don't follow a general pattern
-    for _, row in ltp_tax.iterrows():
+    for idx, row in ltp_tax.iterrows():
+        if row['id'] == 'KF303137':
+            print(row['lineage'])
+            assert row['lineage'].count(';') == 5
+            # this record is missing its genus, need to do it here as we've already tacked on species
+            ltp_tax.loc[idx, 'lineage'] = row['lineage'].replace('Flavobacteriaceae;Aestuariibaculum scopimerae',
+                                                                 'Flavobacteriaceae;Aestuariibaculum;Aestuariibaculum scopimerae')
+
         if ';;' in row['lineage']:
             # one of the records in ltp has dual ;;
-            row['lineage'] = row['lineage'].replace(';;', ';')
+            ltp_tax.loc[idx, 'lineage'] = row['lineage'].replace(';;', ';')
 
         if row['lineage'].startswith(' Bacteria'):
             # note the prefixed whitespace
@@ -787,22 +1188,22 @@ def adjust_ltp(ltp_tax, gtdb_unique, ncbi_to_gtdb):
             # where the lineage appears duplicated. All the ones found
             # also seem to start with a single space. see for example
             # KF863150
-            row['lineage'] = row['lineage'].strip().split(' Bacteria;')[0]
+            ltp_tax.loc[idx, 'lineage'] = row['lineage'].strip().split(' Bacteria;')[0]
 
         if row['id'] == 'MK559992':
             # MK559992 has a genus that appears inconsistent with the species
-            row['lineage'] = row['lineage'].replace('Aureimonas', 'Aureliella')
+            ltp_tax.loc[idx, 'lineage'] = row['lineage'].replace('Aureimonas', 'Aureliella')
 
         if row['id'] == 'HM038000':
             # the wrong order is specified
-            row['lineage'] = row['lineage'].replace('Oligoflexia',
-                                                    'Bdellovibrionia')
+            ltp_tax.loc[idx, 'lineage'] = row['lineage'].replace('Oligoflexia',
+                                                                 'Bdellovibrionia')
 
         if ';Campylobacterales;' in row['lineage']:
             # typo
             if ";Campylobacteria;" not in row['lineage']:
-                row['lineage'] = row['lineage'].replace('Campylobacterales;',
-                                                        'Campylobacteria;Campylobacterales;')
+                ltp_tax.loc[idx, 'lineage'] = row['lineage'].replace('Campylobacterales;',
+                                                                     'Campylobacteria;Campylobacterales;')
 
         if ' subsp. ' in row['lineage']:
             # we can't handle subspecies so let's remove
@@ -810,13 +1211,13 @@ def adjust_ltp(ltp_tax, gtdb_unique, ncbi_to_gtdb):
             species = parts[-1]
             species = species.split(' subsp. ')[0]
             parts[-1] = species
-            row['lineage'] = ';'.join(parts)
+            ltp_tax.loc[idx, 'lineage'] = ';'.join(parts)
 
         if row['id'] == 'AB104858':
             # species name typo
-            row['lineage'] = row['lineage'].replace('Methanothermobacter wolfei',
-                                                    'Methanothermobacter wolfeii')
-            row['original_species'] = 'Methanothermobacter wolfeii'
+            ltp_tax.loc[idx, 'lineage'] = row['lineage'].replace('Methanothermobacter wolfei',
+                                                                 'Methanothermobacter wolfeii')
+            ltp_tax.loc[idx, 'original_species'] = 'Methanothermobacter wolfeii'
 
     # replace lineages from incertae sedis and manual
     ltp_tax['explicitly_set'] = False
@@ -995,6 +1396,20 @@ def graft_from_other(other, lookup):
                 gtdb_node.extend(node.children)
 
 
+def gtdb_taxids_from_metadata(ar_fp, bt_fp):
+    ar = pd.read_csv(ar_fp, sep='\t', dtype=str)
+    ba = pd.read_csv(bt_fp, sep='\t', dtype=str)
+    gtdb_metadata = pd.concat([ar, ba])
+    acc_to_wolid = re.compile(r'_([0-9]{9})\.')
+
+    def fetch(x):
+        return 'G' + acc_to_wolid.scanner(x).search().groups()[0]
+
+    gtdb_metadata['wolid'] = gtdb_metadata['accession'].apply(fetch)
+
+    return {r.wolid: r.ncbi_taxid for r in gtdb_metadata.itertuples()}
+
+
 def gtdb_unique_species_mappings(ar_fp, bt_fp):
     ar = pd.read_csv(ar_fp, sep='\t', dtype=str)
     ba = pd.read_csv(bt_fp, sep='\t', dtype=str)
@@ -1011,6 +1426,42 @@ def gtdb_unique_species_mappings(ar_fp, bt_fp):
 
     # only keep mappings if they are unambiguous
     return {k: list(v)[0] for k, v in gtdb_mappings.items() if len(v) == 1}
+
+
+def non_wol_taxa_in_gtdb(tree_tips, ar_fp, bt_fp):
+    ar = pd.read_csv(ar_fp, sep='\t', dtype=str)
+    ba = pd.read_csv(bt_fp, sep='\t', dtype=str)
+    gtdb_metadata = pd.concat([ar, ba]).set_index('accession')
+
+    match = re.compile(r'(GB_GCA)|(RS_GCF)_([0-9]{9})\.[0-9]')
+    matches = [n for n in tree_tips if match.match(n)]
+
+    def make_wollike(n):
+        extract = re.compile(r'_([0-9]{9})\.[0-9]')
+        return 'G' + extract.search(n).groups()[0]
+
+    extract_gca = re.compile(r'(GB_GCA_[0-9]{9}\.[0-9])')
+    extract_gcf = re.compile(r'(RS_GCF_[0-9]{9}\.[0-9])')
+
+    acc = defaultdict(list)
+    for n in matches:
+        a = extract_gca.match(n)
+        b = extract_gcf.match(n)
+        if a:
+            key = a.groups()[0]
+        elif b:
+            key = b.groups()[0]
+        else:
+            raise ValueError()
+        acc[key].append(n)
+
+    tax_data = gtdb_metadata.loc[set(acc)]['gtdb_taxonomy'].to_dict()
+    expanded_data = [[v, tax_data[k]] for k, all_v in acc.items()
+                     for v in all_v]
+    expanded_data = pd.DataFrame(expanded_data, columns=['id', 'lineage'])
+    expanded_data['wol_like'] = expanded_data['id'].apply(make_wollike)
+
+    return expanded_data
 
 
 def ncbi_to_gtdb_mappings(ar_fp, bt_fp):
@@ -1061,6 +1512,116 @@ def ncbi_to_gtdb_mappings(ar_fp, bt_fp):
     return mappings
 
 
+def preprocess_ltp(ltp_tax, gtdb_unique, ncbi_to_gtdb):
+    # use the synonym if it exists
+    for _, r in ltp_tax.iterrows():
+        if not pd.isnull(r['synonym']):
+            r['original_species'] = r['synonym']
+
+    # remove extraneous whitespace
+    ltp_tax['original_species'] = ltp_tax['original_species'].apply(lambda x: x.strip())
+
+    # set manually obtained tax ids
+    ltp_tax['ncbi_tax_id'] = None
+    for idx, row in ltp_tax.iterrows():
+        if row['id'] in MANUAL_LTP_TAXID_ASSESSMENT:
+            oldname, newname, taxid = MANUAL_LTP_TAXID_ASSESSMENT[row['id']]
+            ltp_tax.loc[idx, 'ncbi_tax_id'] = taxid
+            ltp_tax.loc[idx, 'original_species'] = newname
+
+    # fetch other tax ids
+    to_fetch = list(ltp_tax[ltp_tax['ncbi_tax_id'].isnull()]['original_species'])
+    ltp_ncbi_taxids, ltp_taxid_name_lookup = names_to_taxid(to_fetch)
+
+    # sanity check to make sure we have an ID for everything
+    missing = {k for k, v in ltp_ncbi_taxids.items() if v is None}
+    missing_records = ltp_tax[ltp_tax['original_species'].isin(missing)]
+    for r in missing_records.itertuples():
+        print(r.original_species)
+        raise ValueError()
+
+    # use the already set tax ID if exists otherwise use the one pulled via ETE3
+    def ltp_tax_id(row):
+        if not pd.isnull(row['ncbi_tax_id']):
+            return row['ncbi_tax_id']
+        else:
+            name = row['original_species']
+            if name in ltp_ncbi_taxids:
+                return ltp_ncbi_taxids[name]
+            else:
+                if name in ltp_taxid_name_lookup:
+                    reduced_name = ltp_taxid_name_lookup[name]
+                    return ltp_ncbi_taxids[reduced_name]
+                else:
+                    raise ValueError("Cannot resolve %s" % name)
+    ltp_tax['ncbi_tax_id'] = ltp_tax.apply(ltp_tax_id, axis=1)
+
+    ltp_tax = adjust_ltp(ltp_tax, gtdb_unique, ncbi_to_gtdb)
+
+    return ltp_tax
+
+
+def gtdb_failed_names(failed_fp):
+    # these are from the qc_failed file. GTDB has different QC processes
+    # than WOL
+    df = pd.read_csv(failed_fp, sep='\t', dtype=str).set_index('Accession')
+
+    acc_to_wolid = re.compile(r'_([0-9]{9})\.')
+
+    def fetch(x):
+        return 'G' + acc_to_wolid.scanner(x).search().groups()[0]
+
+    df.index = [fetch(x) for x in df.index]
+    df['NCBI species'] = df['NCBI species'].apply(lambda x: x.split('__', 1)[1])
+    df = df[df['NCBI species'] != '']
+
+    return df['NCBI species'].to_dict()
+
+
+def preprocess_gtdb(gtdb_bacteria, gtdb_archaea, gtdb_failed, ids_of_focus):
+    # TODO: consider using the refseq/genbank assembly metadata directly
+    # which may be easier?
+
+    # get what tax IDs we can get from the GTDB metadata
+    gtdb_taxids = gtdb_taxids_from_metadata(gtdb_archaea, gtdb_bacteria)
+
+    # get a mapping of what "failed" records we have to species
+    gtdb_failed = gtdb_failed_names(gtdb_failed)
+    ids_of_focus = set(ids_of_focus)
+
+    # only concern ourselves with the set of IDs we care about
+    gtdb_failed = {k: v for k, v in gtdb_failed.items() if k in ids_of_focus}
+
+    # resolve manual mappings
+    for k, (oldname, newname, id_) in MANUAL_GTDB_TAXID_ASSESSMENT.items():
+        gtdb_taxids[k] = id_
+
+    for k, (name, id_) in MANUAL_GTDB_FAILURES.items():
+        gtdb_taxids[k] = id_
+
+    # only fetch what we actually need to fetch
+    to_fetch = [gtdb_failed[n] for n in gtdb_failed if n not in gtdb_taxids]
+    gtdb_failed_taxids, gtdb_taxid_lookup = names_to_taxid(to_fetch)
+
+    # pull either an already specified tax ID or one from ETE3
+    tax_ids = {}
+    for k in ids_of_focus:
+        if k in gtdb_taxids:
+            tax_ids[k] = gtdb_taxids[k]
+        else:
+            name = gtdb_failed.get(k)
+            if name is None:
+                print(name)
+                raise ValueError()
+
+            if name in gtdb_taxid_lookup:
+                name = gtdb_taxid_lookup[name]
+
+            id_ = gtdb_failed_taxids[name]
+            tax_ids[k] = id_
+    return tax_ids
+
+
 @click.command()
 @click.option('--tree', type=click.Path(exists=True), required=True,
               help='The backbone tree')
@@ -1074,21 +1635,38 @@ def ncbi_to_gtdb_mappings(ar_fp, bt_fp):
               help='The GTDB archaea metadata')
 @click.option('--gtdb-bacteria', type=click.Path(exists=True), required=True,
               help='The GTDB bacteria metadata')
+@click.option('--gtdb-failed', type=click.Path(exists=True), required=True,
+              help='The GTDB failed entries metadata')
 @click.option('--output', type=click.Path(exists=False))
-def harmonize(tree, gtdb, ltp, output, gtdb_archaea, gtdb_bacteria):
+def harmonize(tree, gtdb, ltp, output, gtdb_archaea, gtdb_bacteria,
+              gtdb_failed):
     tree = bp.to_skbio_treenode(bp.parse_newick(open(tree).read()))
+    tree_tips = {n.name for n in tree.tips()}
+
     gtdb_tax = pd.read_csv(gtdb, sep='\t', names=['id', 'lineage'])
+    gtdb_tax['wol_like'] = gtdb_tax['id']
     ltp_tax = pd.read_csv(ltp, sep='\t', names=['id', 'original_species',
                                                 'lineage', 'u0', 'type',
-                                                'u1', 'u2'])
+                                                'synonym', 'u2'])
+
+    ltp_tax = ltp_tax[ltp_tax['id'].isin(tree_tips)]
+    gtdb_tax = gtdb_tax[gtdb_tax['id'].isin(tree_tips)]
+
+    additional_gtdb_tax = non_wol_taxa_in_gtdb(tree_tips, gtdb_archaea, gtdb_bacteria)
+    gtdb_tax = pd.concat([gtdb_tax, additional_gtdb_tax])
+
     gtdb_unique = gtdb_unique_species_mappings(gtdb_archaea, gtdb_bacteria)
     ncbi_to_gtdb = ncbi_to_gtdb_mappings(gtdb_archaea, gtdb_bacteria)
 
-    tree_tips = {n.name for n in tree.tips()}
+    gtdb_taxids = preprocess_gtdb(gtdb_bacteria, gtdb_archaea, gtdb_failed, list(gtdb_tax['wol_like']))
+    ltp_tax = preprocess_ltp(ltp_tax, gtdb_unique, ncbi_to_gtdb)
 
-    ltp_tax = adjust_ltp(ltp_tax, gtdb_unique, ncbi_to_gtdb)
-
-    ltp_tax = ltp_tax[ltp_tax['id'].isin(tree_tips)]
+    full_set_of_ncbi_tax_ids = [[r.id, r.ncbi_tax_id] for r in ltp_tax.itertuples()]
+    full_set_of_ncbi_tax_ids += [[k, gtdb_taxids[k]] for k in gtdb_tax['wol_like']]
+    full_set_of_ncbi_tax_ids = pd.DataFrame(full_set_of_ncbi_tax_ids,
+                                            columns=['Feature ID', 'ncbi_tax_id'])
+    full_set_of_ncbi_tax_ids.to_csv(output + '.ncbi_tax_ids', sep='\t', index=False,
+                                    header=True)
 
     parse_lineage(gtdb_tax)
     parse_lineage(ltp_tax)
@@ -1144,7 +1722,8 @@ def harmonize(tree, gtdb, ltp, output, gtdb_archaea, gtdb_bacteria):
 
     graft_from_other(ltp_tree, lookup)
     missing = [n.name for n in ltp_tree.tips()][:5]
-    print(missing)
+    if missing:
+        print(missing)
 
     result = pull_consensus_strings(gtdb_tree, append_prefix=False)
     f = open(output, 'w')
